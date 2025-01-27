@@ -18,26 +18,50 @@ document.getElementById('uploadButton').addEventListener('click', async () => {
     const apiKey = 'acc_c23f378a7618b4f';
     const apiSecret = '9c5f1fc9b6c3d4331f8291cdcbaef879';
     const authHeader = 'Basic ' + btoa(`${apiKey}:${apiSecret}`);
+    console.log('Authorization Header:', authHeader);  // Verifică header-ul
 
-    // Prepare data for upload
+    const uploadId = 'i138c1df198ac0b15add171318D6i7xT'; // ID primit din răspuns
+    const response = await fetch(`https://api.imagga.com/v2/colors?image_upload_id=${uploadId}`, {
+        method: 'GET',
+        headers: {
+            'Authorization': authHeader // același header generat cu cheia și secretul
+        }
+    });
+
+    if (!response.ok) {
+        console.error('Failed to fetch colors for test:', response.status);
+        const errorText = await response.text();
+        console.log('Error response for test:', errorText);
+    } else {
+        const data = await response.json();
+        console.log('Colors response for test:', data);
+    }
+
     const formData = new FormData();
     formData.append('image', file);
 
-    let upload_id;
 
     try {
+        // Show upload modal and reset progress bar
         uploadModal.style.display = 'block';
         uploadProgress.style.width = '0%';
 
-
+        // Upload image to Imagga
         const uploadResponse = await fetch('https://api.imagga.com/v2/uploads', {
             method: 'POST',
+            mode: 'no-cors',
             headers: { 'Authorization': authHeader },
             body: formData
         });
 
-
-        if (!uploadResponse.ok) throw new Error('Upload failed.');
+        if (!uploadResponse.ok) {
+            const errorText = await uploadResponse.text();  // Adaugă această linie pentru a obține răspunsul complet
+            console.error('Error response from API:', errorText);  // Vezi exact ce răspunde API-ul
+            throw new Error('Upload failed.');
+        } else {
+            const uploadData = await uploadResponse.json();
+            console.log('Upload success:', uploadData);
+        }
 
         // Track upload progress
         const contentLength = +uploadResponse.headers.get('Content-Length');
@@ -45,6 +69,7 @@ document.getElementById('uploadButton').addEventListener('click', async () => {
         let receivedLength = 0;
         let chunks = [];
 
+        // Read response stream and update progress
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -53,57 +78,47 @@ document.getElementById('uploadButton').addEventListener('click', async () => {
             uploadProgress.style.width = `${(receivedLength / contentLength) * 100}%`;
         }
 
-
+        // Decode and parse upload response
         const responseArray = new Uint8Array(receivedLength);
         let position = 0;
         for (const chunk of chunks) {
             responseArray.set(chunk, position);
             position += chunk.length;
         }
+
         const text = new TextDecoder('utf-8').decode(responseArray);
-        const parsedResponse = JSON.parse(text);
-        upload_id = parsedResponse.result.upload_id;
+        const { result: { upload_id } } = JSON.parse(text);
 
-        console.log('Fetching colors with upload_id:', upload_id);
-        const colorResponse = await fetch(`https://api.imagga.com/v2/colors?image_upload_id=${upload_id}`, { headers: { 'Authorization': authHeader } });
-        if (!colorResponse.ok) {
-            throw new Error(`Failed to fetch colors: ${colorResponse.status} ${colorResponse.statusText}`);
-        }
-        const colorResult = await colorResponse.json();
+        // Fetch color and tag analysis from Imagga
+        const [colorResult, tagsResult] = await Promise.all([
+            fetch(`https://api.imagga.com/v2/colors?image_upload_id=${upload_id}`, { headers: { 'Authorization': authHeader } }).then(res => res.json()),
+            fetch(`https://api.imagga.com/v2/tags?image_upload_id=${upload_id}`, { headers: { 'Authorization': authHeader } }).then(res => res.json()),
+        ]);
 
-        console.log('Fetching tags with upload_id:', upload_id);
-        const tagsResponse = await fetch(`https://api.imagga.com/v2/tags?image_upload_id=${upload_id}`, { headers: { 'Authorization': authHeader } });
-        if (!tagsResponse.ok) {
-            throw new Error(`Failed to fetch tags: ${tagsResponse.status} ${tagsResponse.statusText}`);
-        }
-        const tagsResult = await tagsResponse.json();
-
+        // Display the results
         displayColors(colorResult.result.colors);
         displayTags(tagsResult.result.tags);
     } catch (error) {
         console.error('Error:', error);
-        console.error('Details:', {
-            upload_id,
-            authHeader,
-            message: error.message,
-            stack: error.stack
-        });
         showToast('An error occurred while processing the image!');
     } finally {
+        // Hide the upload modal after processing
         uploadModal.style.display = 'none';
     }
 });
 
-
+// Function to display color analysis results
 const displayColors = colors => {
     const colorsContainer = document.querySelector('.colors-container');
-    colorsContainer.innerHTML = '';
+    colorsContainer.innerHTML = ''; // Clear previous results
 
+    // If no colors are found, show an error message
     if (![colors.background_colors, colors.foreground_colors, colors.image_colors].some(arr => arr.length)) {
         colorsContainer.innerHTML = '<p class="error">Nothing to show...</p>';
         return;
     }
 
+    // Generate HTML sections for different color types
     const generateColorSection = (title, colorData) => {
         return `
 
@@ -125,10 +140,12 @@ const displayColors = colors => {
         `;
     };
 
+    // Append generated color sections to the container
     colorsContainer.innerHTML += generateColorSection('Background Colors', colors.background_colors);
     colorsContainer.innerHTML += generateColorSection('Foreground Colors', colors.foreground_colors);
     colorsContainer.innerHTML += generateColorSection('Image Colors', colors.image_colors);
 
+    // Add click functionality to copy color code to clipboard
     document.querySelectorAll('.colors-container .result-item').forEach(item => {
         item.addEventListener('click', () => {
             const colorCode = item.getAttribute('data-color');
@@ -138,7 +155,7 @@ const displayColors = colors => {
 
 };
 
-
+// Function to display tags with pagination (See More)
 let allTags = [];
 let displayedTags = 0;
 
@@ -149,6 +166,7 @@ const displayTags = tags => {
     const seeMoreButton = document.getElementById('seeMoreButton');
     const exportTagsButton = document.getElementById('exportTagsButton');
 
+    // Clear previous tags
     if (resultList) {
         resultList.innerHTML = '';
     } else {
@@ -157,10 +175,11 @@ const displayTags = tags => {
         tagsContainer.insertBefore(resultListContainer, seeMoreButton);
     }
 
-
+    // Store all tags and initialize displayed tags count
     allTags = tags;
     displayedTags = 0;
 
+    // Function to show more tags when "See More" button is clicked
     const showMoreTags = () => {
         const tagsToShow = allTags.slice(displayedTags, displayedTags + tagsPerPage);
         displayedTags += tagsToShow.length;
@@ -176,25 +195,27 @@ const displayTags = tags => {
             resultList.innerHTML += tagsHTML;
         }
 
+        // Toggle visibility of error and buttons based on displayed tags
         error.style.display = displayedTags > 0 ? 'none' : 'block';
         seeMoreButton.style.display = displayedTags < allTags.length ? 'block' : 'none';
         exportTagsButton.style.display = displayedTags > 0 ? 'block' : 'none';
     };
 
-    showMoreTags();
+    showMoreTags(); // Initial load of tags
 
+    // Event listeners for "See More" and "Export Tags" buttons
     seeMoreButton.addEventListener('click', showMoreTags);
     exportTagsButton.addEventListener('click', exportTagsToFile);
 };
 
-
+// Function to export tags to a text file
 const exportTagsToFile = () => {
     if (allTags.length === 0) {
         showToast('No tags available to export!');
         return;
     }
 
-
+    // Convert tags to text and trigger download
     const tagsText = allTags.map(({ tag: { en } }) => en).join('\n');
     const blob = new Blob([tagsText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -205,7 +226,7 @@ const exportTagsToFile = () => {
     URL.revokeObjectURL(url);
 };
 
-
+// Function to show toast messages
 const showToast = message => {
     const toast = document.createElement('div');
     toast.className = 'toast';
