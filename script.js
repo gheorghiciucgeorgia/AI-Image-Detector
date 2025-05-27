@@ -15,12 +15,12 @@ document.getElementById('uploadButton').addEventListener('click', async () => {
     reader.onload = e => imagePreview.src = e.target.result;
     reader.readAsDataURL(file);
 
-    const apiKey = 'acc_c23f378a7618b4f';
-    const apiSecret = '9c5f1fc9b6c3d4331f8291cdcbaef879';
+    const apiKey = '';
+    const apiSecret = '';
     const authHeader = 'Basic ' + btoa(`${apiKey}:${apiSecret}`);
     console.log('Authorization Header:', authHeader);  // Verifică header-ul
 
-    const uploadId = 'i138c1df198ac0b15add171318D6i7xT'; // ID primit din răspuns
+    const uploadId = ''; // ID primit din răspuns
     const response = await fetch(`https://api.imagga.com/v2/colors?image_upload_id=${uploadId}`, {
         method: 'GET',
         headers: {
